@@ -1,260 +1,179 @@
-from IPython.display import display
-from matplotlib import pyplot as plt
 import numpy as np
 import os
 import pandas as pd
 import seaborn as sns
+from matplotlib import pyplot as plt
 from sklearn import metrics
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFECV
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, mean_squared_error
-from sklearn.model_selection import cross_val_predict, cross_val_score, GridSearchCV, train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import cross_val_score, GridSearchCV
 from sklearn.preprocessing import LabelEncoder
-import string
 import warnings
 
 warnings.filterwarnings('ignore')
 
-os.chdir('/users/timchan/documents/machine learning/titanic/')
-
+# import data
 train_data = pd.read_csv('train.csv')
 test_data = pd.read_csv('test.csv')
+
+## Exploratory Data Analysis
+
+# drop Cabin (missingd value > 70%)
+train_data.drop(['Cabin'], axis=1, inplace=True)
+test_data.drop(['Cabin'], axis=1, inplace=True)
+
+
+## Imputataion of Missing data/ outliers
+
+# impute missing data for Age in both train and test dataset
 whole_data = train_data.append(test_data)
-
-# handle outliers under Fare
-whole_data['Fare'].fillna(whole_data['Fare'].median(), inplace=True)
-'''
-outlier = np.max(whole_data['Fare'])
-whole_data['Fare'].replace(outlier, whole_data['Fare'].median(), inplace=True)
-'''
-# Convert Sex
-whole_data['Sex_Code'] = whole_data['Sex'].map({'female':1, 'male':0}).astype('int')
-
-# Split [Fare] into different categories to avoid overfitting
-whole_data['FareBin_4'] = pd.qcut(whole_data['Fare'], 4)
-whole_data['FareBin_5'] = pd.qcut(whole_data['Fare'], 5)
-whole_data['FareBin_6'] = pd.qcut(whole_data['Fare'], 6)
-label = LabelEncoder()
-whole_data['FareBin_Code_4'] = label.fit_transform(whole_data['FareBin_4'])
-whole_data['FareBin_Code_5'] = label.fit_transform(whole_data['FareBin_5'])
-whole_data['FareBin_Code_6'] = label.fit_transform(whole_data['FareBin_6'])
-
-# Title
 whole_data['Title'] = whole_data.Name.str.extract(r'([A-Za-z]+)\.', expand=False)
 Common_Title = ['Mr', 'Miss', 'Mrs', 'Master']
 whole_data['Title'].replace(['Ms', 'Mlle', 'Mme'], 'Miss', inplace=True)
 whole_data['Title'].replace(['Lady'], 'Mrs', inplace=True)
 whole_data['Title'].replace(['Sir', 'Rev'], 'Mr', inplace=True)
 whole_data['Title'][~whole_data.Title.isin(Common_Title)] = 'Others'
-whole_data['Title_Code'] = whole_data.Title.map({'Mr':0, 'Miss':1, 'Mrs':2, 'Master':3, 'Others':4}).astype('int')
-
-whole_data['Baby'] = whole_data.Title.map(lambda x: 1 if x =='Master' else 0)
-
-# Handle Cabin
-'''
-whole_data['Cabin_Code'] = whole_data['Cabin'].str.extract(r'([A-Za-z]+)', expand=False)
-whole_data['Cabin_Code'].fillna('U', inplace=True)
-whole_data['Cabin_Code'] = whole_data.Cabin_Code.map({'U':0, 'A':1, 'B':2, 'C':3, 'D':4, 'E':5, 'F':6, 'G':7, 'T':8}).astype('int')
-'''
-whole_data['Has_Cabin'] = whole_data.Cabin.isnull()*1
-
-# filling missing values in Age
-Age_Median = whole_data.groupby('Title')['Age'].median()
-whole_data['New_Age'] = whole_data['Age']
-for title in Age_Median.index:
-    whole_data['New_Age'][(whole_data.New_Age.isnull()) & (whole_data.Title == title)] = Age_Median[title]
-whole_data['Child'] = whole_data.New_Age.map(lambda x: 1 if x <=16 else 0)
-
-whole_data['AgeBin_4'] = pd.qcut(whole_data['New_Age'], 4)
-whole_data['AgeBin_5'] = pd.qcut(whole_data['New_Age'], 5)
-whole_data['AgeBin_6'] = pd.qcut(whole_data['New_Age'], 6)
-label = LabelEncoder()
-whole_data['AgeBin_Code_4'] = label.fit_transform(whole_data['AgeBin_4'])
-whole_data['AgeBin_Code_5'] = label.fit_transform(whole_data['AgeBin_5'])
-whole_data['AgeBin_Code_6'] = label.fit_transform(whole_data['AgeBin_6'])
-
-'''
-fig, [ax1, ax2, ax3] = plt.subplots(1, 3, sharey=True)
-fig.set_figwidth(18)
-for axi in [ax1, ax2, ax3]:
-    axi.axhline(0.38, linestyle='dashed', c='black', alpha=.3)
-g1 = sns.barplot(x='AgeBin_Code_4', y='Survived', data=whole_data, ax=ax1)
-g2 = sns.barplot(x='AgeBin_Code_5', y='Survived', data=whole_data, ax=ax2)
-g3 = sns.barplot(x='AgeBin_Code_6', y='Survived', data=whole_data, ax=ax3)
-'''
-
-# duplicate ticket
-'''
-whole_data['Duplicate_Ticket'] = whole_data.Ticket.duplicated(keep=False)*1
-
-whole_data['Connected_Survival'] = 0.5
-df4 = whole_data[whole_data['Duplicate_Ticket']==1][['Ticket', 'Pclass', 'Survived']]
-
-
-for tk in whole_data[whole_data.Duplicate_Ticket==1]['Ticket'].unique():
-    df7 = df4[df4.Survived.isnull()==False][['Ticket', 'Survived']].groupby('Ticket').sum()
-    for tk in df7.index:
-        if df7.loc[tk][0] >= 1:
-            whole_data.loc[whole_data['Ticket']==tk, ['Connected_Survival']] = 1
-        elif df7.loc[tk][0] ==0:
-            whole_data.loc[whole_data['Ticket']==tk, ['Connected_Survival']] = 0
-
-    elif (1, 2) in df4[df4.Ticket==tk]['Pclass'].values:
-        whole_data.loc[whole_data['Ticket']==tk, ['Connected_Survival']] = 1
-    elif 3 in df4[df4.Ticket==tk]['Pclass'].values:
-        whole_data.loc[whole_data['Ticket']==tk, ['Connected_Survival']] = 0
-'''
-
-# Family group
-
-whole_data['Surname'] = whole_data.Name.str.extract(r'([A-Za-z]+),', expand=False)
-whole_data['TixPre'] = whole_data.Ticket.str.extract(r'(.*\d)', expand=False)
-whole_data['SurTix'] = whole_data['Surname'] + whole_data['TixPre']
-whole_data['Duplicate_SurTix'] = whole_data.SurTix.duplicated(keep=False)*1
-
-FamilyTix_withChild = whole_data[(whole_data.Child==1) & (whole_data.Duplicate_SurTix==1)]['SurTix'].unique()
-
-whole_data['FamilyId'] = 0
-
-x = 1
-
-for tix in FamilyTix_withChild:
-    whole_data.loc[whole_data.SurTix==tix, ['FamilyId']] = x
-    x += 1
-'''
-whole_data['Survived'].fillna(9, inplace=True)
-pd.crosstab(whole_data.FamilyId, whole_data.Survived).drop([0]).plot(kind='bar', stacked=True, color=['black','g','grey'])
-'''
-
-whole_data['Connected_Survival'] = 0.5
-
-table_FamilySurvivied = whole_data.groupby('FamilyId').Survived.sum()
-for i in range(1, len(FamilyTix_withChild)+1):
-    if table_FamilySurvivied[i] >= 1:
-        whole_data.loc[whole_data.FamilyId==i, ['Connected_Survival']] = 1
-    elif table_FamilySurvivied[i] == 0:
-        whole_data.loc[whole_data.FamilyId==i, ['Connected_Survival']] = 0
-
-# Fill missing Embarked value
-whole_data['Embarked'].fillna(whole_data.Embarked.mode()[0], inplace=True)
-whole_data['Embarked_Code'] = whole_data['Embarked'].map({'S':0, 'C':1, 'Q':2}).astype('int')
-
-# family size
-
-whole_data['FamilySize'] = whole_data.SibSp + whole_data.Parch + 1
-'''
-whole_data['Alone'] = whole_data.FamilySize.map(lambda x: 1 if x == 1 else 0)
-whole_data['SmallFamily'] = whole_data.FamilySize.map(lambda x: 1 if 2<= x  <= 4 else 0)
-whole_data['LargeFamily'] = whole_data.FamilySize.map(lambda x: 1 if x >= 5 else 0)
-'''
-# plot
-'''
-fig, [ax1, ax2, ax3] = plt.subplots(1,3)
-g1 = pd.crosstab(whole_data.FamilySize, whole_data.Sex).plot(kind='bar', stacked=True, ax=ax1)
-g2 = sns.countplot(whole_data[whole_data.Child==1]['FamilySize'], ax=ax2)
-g3 = sns.barplot(x='FamilySize', y='Survived', data=whole_data, ax=ax3)
-'''
-'''
-fig, [ax1, ax2, ax3] = plt.subplots(1,3)
-ax1 = pd.crosstab(whole_data.Embarked, whole_data.Sex).reindex(['S','C','Q']).plot(kind='bar', stacked=True, ax=ax1)
-ax2 = sns.barplot(x='Embarked', y='Survived', data=whole_data, ax=ax2)
-ax3 = pd.crosstab(whole_data.Embarked, whole_data.FareBin_Code_5).reindex(['S','C','Q']).plot(kind='bar', stacked=True, ax=ax3)
-ax1.set_title('Embarked counts with Sex')
-ax2.set_title('Embarked vs Survived')
-ax3.set_title('Embarked counts with Fare')
-'''
-'''
-fig, ax = plt.subplots(2,2)
-ax = sns.distplot(whole_data[whole_data.Embarked=='S']['New_Age'], kde=False, norm_hist=True, label='S')
-ax = sns.distplot(whole_data[whole_data.Embarked=='C']['New_Age'], kde=False, norm_hist=True, label='C')
-ax = sns.distplot(whole_data[whole_data.Embarked=='Q']['New_Age'], kde=False, norm_hist=True, label='Q')
-ax.legend()
-'''
-'''
-fig, ax = plt.subplots(1,3)
-ax1 = sns.barplot(x='Cabin_Code', y='Survived', data=whole_data, ax=ax1)
-ax2 = sns.boxplot(x='Cabin_Code', y='Fare', data=whole_data, ax=ax2)
-ax3 = pd.crosstab(whole_data.Cabin_Code, whole_data.Sex).plot(kind='bar', stacked=True, ax=ax3)
-'''
-'''
-fig, ax = plt.subplots(2,2)
-ax[0,0] = sns.barplot(x='Embarked', y='Survived', data=whole_data, ax=ax[0,0])
-ax[1,0] = sns.barplot(x='Embarked', y='Survived', hue='Sex', data=whole_data, ax=ax[1,0])
-ax[0,1] = sns.barplot(x='Embarked', y='Survived', hue='Baby', data=whole_data, ax=ax[0,1])
-ax[1,1] = sns.barplot(x='Embarked', y='Survived', hue='Pclass', data=whole_data, ax=ax[1,1])
-'''
-
-# modelling
 
 train_data = whole_data[:len(train_data)]
 test_data = whole_data[len(train_data):]
 
-y = train_data['Survived']
-X = train_data.drop(['Survived', 'PassengerId'], axis=1)
+AgeMedian_by_titles = train_data.groupby('Title')['Age'].median()
+for title in AgeMedian_by_titles.index:
+    train_data['Age'][(train_data.Age.isnull()) & (train_data.Title == title)] = AgeMedian_by_titles[title]
+    test_data['Age'][(test_data.Age.isnull()) & (test_data.Title == title)] = AgeMedian_by_titles[title]
 
-model1 = RandomForestClassifier(n_estimators=250, min_samples_split=20, random_state=2)
-model2 = LogisticRegression()
-base1 = [ 'Sex_Code', 'Pclass','FareBin_Code_5', 'Connected_Survival', 'Title_Code']
-X_train = X[base1]
-X_test = test_data.drop(['PassengerId'], axis=1)[base1]
+# Impute missing data for Embarked in train dataset
+train_data['Embarked'].fillna(train_data.Embarked.mode()[0], inplace=True)
+
+# Impute missing data for Fare in test dataset
+test_data['Fare'].fillna(test_data['Fare'].median(), inplace=True)
+
+# Replace outliers Fare in train dataset
+train_data.loc[train_data.Fare>512, 'Fare'] = 263
 
 
-model1.fit(X_train,y)
-importances = pd.DataFrame({'feature':X_train.columns, 'importance': np.round(model1.feature_importances_,3)})
-importances = importances.sort_values('importance', ascending=False).set_index('feature')
-print(importances)
+## Data Transforming
 
+# Encode Sex
+train_data['Sex_Code'] = train_data['Sex'].map({'female':1, 'male':0}).astype('int')
+test_data['Sex_Code'] = test_data['Sex'].map({'female':1, 'male':0}).astype('int')
+
+# Encode Embarked
+train_data['Embarked_Code'] = train_data['Embarked'].map({'S':0, 'C':1, 'Q':2}).astype('int')
+test_data['Embarked_Code'] = test_data['Embarked'].map({'S':0, 'C':1, 'Q':2}).astype('int')
+
+# Binning Age
+train_data['AgeBin_5'] = pd.qcut(train_data['Age'], 5)
+test_data['AgeBin_5'] = pd.qcut(test_data['Age'], 5)
+
+# Binning Fare
+train_data['FareBin_5'] = pd.qcut(train_data['Fare'], 5)
+test_data['FareBin_5'] = pd.qcut(test_data['Fare'], 5)
+
+# Encode Age and Fare
+label = LabelEncoder()
+train_data['AgeBin_Code_5'] = label.fit_transform(train_data['AgeBin_5'])
+test_data['AgeBin_Code_5'] = label.fit_transform(test_data['AgeBin_5'])
+label = LabelEncoder()
+train_data['FareBin_Code_5'] = label.fit_transform(train_data['FareBin_5'])
+test_data['FareBin_Code_5'] = label.fit_transform(test_data['FareBin_5'])
+'''
+whole_data['FareBin_5'] = pd.qcut(whole_data['Fare'], 5)
+label = LabelEncoder()
+whole_data['FareBin_Code_5'] = label.fit_transform(whole_data['FareBin_5'])
+'''
+## Feature Creation
+# Alone
+train_data['FamilySize'] = train_data.SibSp + train_data.Parch + 1
+test_data['FamilySize'] = test_data.SibSp + test_data.Parch + 1
+
+train_data['Alone'] = train_data.FamilySize.map(lambda x: 1 if x == 1 else 0)
+test_data['Alone'] = test_data.FamilySize.map(lambda x: 1 if x == 1 else 0)
+
+# Title
+train_data['Title_Code'] = train_data.Title.map({'Mr':0, 'Miss':1, 'Mrs':2, 'Master':3, 'Others':4}).astype('int')
+test_data['Title_Code'] = test_data.Title.map({'Mr':0, 'Miss':1, 'Mrs':2, 'Master':3, 'Others':4}).astype('int')
+
+# Family Survival
+
+whole_data = train_data.append(test_data)
+whole_data['Surname'] = whole_data.Name.str.extract(r'([A-Za-z]+),', expand=False)
+whole_data['TixPref'] = whole_data.Ticket.str.extract(r'(.*\d)', expand=False)
+whole_data['SurTix'] = whole_data['Surname'] + whole_data['TixPref']
+whole_data['IsFamily'] = whole_data.SurTix.duplicated(keep=False)*1
+
+whole_data['Child'] = whole_data.Age.map(lambda x: 1 if x <=16 else 0)
+UniqueFamilyTixWithChild = whole_data[(whole_data.IsFamily==1)&(whole_data.Child==1)]['SurTix'].unique()
+
+whole_data['FamilyId'] = 0
+x = 1
+for tix in UniqueFamilyTixWithChild:
+ whole_data.loc[whole_data.SurTix==tix, ['FamilyId']] = x
+ x += 1
+ 
+'''
+# connected survival plot
+whole_data['SurvivedDemo'] = whole_data['Survived'].fillna(9)
+pd.crosstab(whole_data.FamilyId, whole_data.SurvivedDemo).drop([0]).plot(kind='bar', stacked=True, color=['black','g','grey'])
+'''
+
+whole_data['ConnectedSurvival'] = 0.5
+
+Survived_by_FamilyId = whole_data.groupby('FamilyId').Survived.sum()
+for i in range(1, len(UniqueFamilyTixWithChild)+1):
+    if Survived_by_FamilyId[i] >= 1:
+        whole_data.loc[whole_data.FamilyId==i, ['ConnectedSurvival']] = 1
+    elif Survived_by_FamilyId[i] == 0:
+        whole_data.loc[whole_data.FamilyId==i, ['ConnectedSurvival']] = 0
+
+# Model
+train_data = whole_data[:len(train_data)]
+test_data = whole_data[len(train_data):]
+
+X_train = train_data.drop(['Age', 'Embarked', 'Fare', 'Name', 'Parch', 'PassengerId', 'Sex', 'SibSp', 'Survived', 'Ticket', 'Title', 'AgeBin_5', 'FareBin_5', 'FamilySize', 'Surname', 'TixPref', 'SurTix', 'IsFamily', 'Child', 'FamilyId'], axis=1)
+y_train = train_data['Survived']
+
+model = RandomForestClassifier(n_estimators=300, bootstrap=True, criterion= 'entropy', min_samples_leaf=5, min_samples_split=2, random_state=2)
+
+model.fit(X_train,y_train)
+importance = pd.DataFrame({'feature':X_train.columns, 'importance': np.round(model.feature_importances_,3)})
+importance = importance.sort_values('importance', ascending=False).set_index('feature')
+print(importance)
+
+final = ['Title_Code', 'Sex_Code', 'ConnectedSurvival', 'Pclass', 'FareBin_Code_5']
 
 '''
 grid_param = {
-    'n_estimators': [100, 200, 300],
-    'criterion':['gini', 'entropy'],
-    'min_samples_split': [2, 10, 20],
-    'min_samples_leaf': [1, 5],
-    'bootstrap': [True, False],
+ 'n_estimators': [100, 200, 300],
+ 'criterion':['gini', 'entropy'],
+ 'min_samples_split': [2, 10, 20],
+ 'min_samples_leaf': [1, 5],
+ 'bootstrap': [True, False],
 }
-
-gd_sr = GridSearchCV(estimator=model1,
-                     param_grid=grid_param,
-                     scoring='accuracy',
-                     cv=5,
-                     n_jobs=-1)
-
-gd_sr.fit(X_train, y)
+gd_sr = GridSearchCV(estimator=model,
+ param_grid=grid_param,
+ scoring='accuracy',
+ cv=5,
+ n_jobs=-1)
+gd_sr.fit(X_train[final], y_train)
 best_parameters = gd_sr.best_params_
 print(best_parameters)
 '''
 
-'''
-compare = ['Sex_Code', 'Pclass', 'Title_Code', 'FareBin_Code_5', 'AgeBin_Code_4', 'AgeBin_Code_5', 'AgeBin_Code_6']
-selector = RFECV(RandomForestClassifier(n_estimators=250, min_samples_split=20), cv=10, n_jobs=-1)
-selector.fit(X[compare], y)
-print(selector.support_)
-print(selector.ranking_)
-print(selector.grid_scores_*100)
-'''
 
-
-all_accuracies = cross_val_score(estimator=model1, X=X_train, y=y, cv=5)
+all_accuracies = cross_val_score(estimator=model, X=X_train[final], y=y_train, cv=5)
 print(all_accuracies)
 print(all_accuracies.mean())
-predictions = cross_val_predict(model1, X_train, y, cv=5)
-print(accuracy_score(y, predictions))
-print(metrics.r2_score(y, predictions))
 
 
-'''
-model1.fit(X_train, y)
-predictions = model1.predict(X_test)
-output = pd.DataFrame({'PassengerId': test_data.PassengerId, 'Survived': predictions.astype(int)})
-output.to_csv('my_submission_v42.csv', index=False)
-print('Your submission was successfully saved!')
-'''
+# Submission
+X_test = test_data[final]
 
-# plot
-'''
-fig, [ax1, ax2] = plt.subplots(1,2)
-ax1 = sns.distplot(train_data['New_Age'], kde=False, norm_hist=True, ax=ax1)
-az2 = sns.distplot(test_data['New_Age'], kde=False, norm_hist=True, ax=ax2)
-'''
+model.fit(X_train[final],y_train)
+prediction = model.predict(X_test)
+output = pd.DataFrame({'PassengerId': test_data.PassengerId, 'Survived': prediction.astype(int)})
+output.to_csv('my_submission.csv', index=False)
+
+
